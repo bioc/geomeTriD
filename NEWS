@@ -1,3 +1,7 @@
+Changes in version 0.99.18
+
+    o Fix the issue for measurements in threeJsViewer when the world matrix updated.
+    
 Changes in version 0.99.17
 
     o Add parameter genomicScoreRange parameter for create3dGenomicSignals.
