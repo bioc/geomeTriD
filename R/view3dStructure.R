@@ -233,7 +233,13 @@ view3dStructure <- function(obj, feature.gr,
     obj$y <- obj$y * mf
     obj$z <- obj$z * mf
     ## spline smooth for each bin with 30 points
-    obj <- smooth3dPoints(obj, 30)
+    dots <- list(...)
+    if('resolution' %in% names(dots)){
+      obj <- smooth3dPoints(obj, dots$resolution)
+    }else{
+      obj <- smooth3dPoints(obj, 30)
+    }
+    
     ## obj is the GRanges with p0 and p1 (x,y,z) coordinates
 
     geometries <- list() ## list to save all geometries to plot
@@ -301,6 +307,7 @@ view3dStructure <- function(obj, feature.gr,
         ...,
         SIMPLIFY = FALSE
       )
+      names(genomic_signal_geometry) <- NULL
       geometries <- c(
         geometries,
         unlist(genomic_signal_geometry[
@@ -372,139 +379,165 @@ view3dStructure <- function(obj, feature.gr,
     }
 
     ## add gene annotation
-    genePos <- calGenePos(feature.gr, obj, arrowLen, rate = rate, kd = 3)
-    if (length(genePos) > 0) {
-      gene_body_geometries <- lapply(seq_along(genePos$xs), function(idx) {
-        threeJsGeometry(
-          x = genePos$xs[[idx]],
-          y = genePos$ys[[idx]],
-          z = genePos$zs[[idx]],
-          colors = genePos$fgf$col[idx],
-          type = "line",
-          tag = "gene_body",
-          properties = list(
-            size = lwd.gene,
-            target = unname(genePos$fgf$label[idx])
-          )
-        )
-      })
-      names(gene_body_geometries) <- paste0("gene_body_", genePos$fgf$label)
-      geometries <- c(geometries, gene_body_geometries)
-
-      ## add a vertical line at the TSS.
-      geometries$tss_vl <- threeJsGeometry(
-        x = as.numeric(rbind(genePos$x1, genePos$x2)),
-        y = as.numeric(rbind(genePos$y1, genePos$y2)),
-        z = as.numeric(rbind(genePos$z1, genePos$z2)),
-        colors = genePos$fgf$col,
-        type = "segment",
-        tag = "tss_labels",
-        properties = list(
-          size = lwd.gene / 2
-        )
-      )
-
-      isGene <- genePos$fgf$type %in% "gene" & !genePos$missing_start
-      if (any(isGene)) {
-        ## add arrow
-        tss_arrow <- lapply(which(isGene), function(idx) {
-          threeJsGeometry(
-            x = c(genePos$x2[idx], tail(genePos$x3[[idx]], n = 1)),
-            y = c(genePos$y2[idx], tail(genePos$y3[[idx]], n = 1)),
-            z = c(genePos$z2[idx], tail(genePos$z3[[idx]], n = 1)),
-            type = "arrow",
-            colors = genePos$fgf$col[idx],
-            tag = "tss_labels",
-            properties = list(
-              headLength = as.numeric(arrowLen) * .2,
-              headWidth = as.numeric(arrowLen) * .2,
-              size = lwd.gene / 2,
-              target = unname(genePos$fgf$label[idx])
-            )
-          )
-        })
-        names(tss_arrow) <- paste0("arrow_", genePos$fgf$label[isGene])
-        geometries <- c(geometries, tss_arrow)
-      }
-
-      notGene <- (!genePos$fgf$type %in% "gene") & (!genePos$missing_start)
-      if (any(notGene)) {
-        notGeneRadius <- genePos$fgf$pch[notGene]
-        if (length(notGeneRadius) != sum(notGene)) {
-          notGeneRadius <- genePos$fgf$size[notGene]
-          if (length(genePos$fgf$size[notGene]) == sum(notGene)) {
-            if (!all(vapply(notGeneRadius, is.unit, logical(1L)))) {
-              stop("The size is not in unit format.")
-            }
-            notGeneRadius <- convertUnit(notGeneRadius,
-              unitTo = "inch",
-              valueOnly = TRUE
-            ) / 5
-          } else {
-            notGeneRadius <- 1
-          }
-        }else{
-          notGeneRadius <- notGeneRadius/36
-        }
-        if (length(unique(notGeneRadius)) == 1) {
-          geometries$cRE <- threeJsGeometry(
-            x = genePos$x2[notGene],
-            y = genePos$y2[notGene],
-            z = genePos$z2[notGene],
-            type = "tetrahedron",
-            colors = genePos$fgf$col[notGene],
-            tag = "cRE",
-            properties = list(
-              radius = notGeneRadius[1]
-            )
-          )
-        } else {
-          if (any(duplicated(notGeneRadius))) {
-            cis_fgf <- unique(notGeneRadius)
-            geometries_cRE <- lapply(cis_fgf, function(.r) {
-              idx <- which(notGeneRadius == .r)
-              threeJsGeometry(
-                x = genePos$x2[notGene][idx],
-                y = genePos$y2[notGene][idx],
-                z = genePos$z2[notGene][idx],
-                type = "tetrahedron",
-                colors = genePos$fgf$col[notGene][idx],
-                tag = "cRE",
-                properties = list(
-                  radius = .r
-                )
-              )
-            })
-            names(geometries_cRE) <- paste0("cRE_", cis_fgf)
-            geometries <- c(geometries, geometries_cRE)
-          }
-        }
-      }
-      if (label_gene && any(!is.na(genePos$fgf$label))) {
-        gene_labels_geometries <- lapply(
-          seq_along(genePos$fgf$label)[!is.na(genePos$fgf$label)],
-          function(idx) {
+    if(is(feature.gr, 'GRanges')){
+      feature.gr$type <- tolower(feature.gr$type)
+      feature.gr.s <- split(feature.gr, feature.gr$type)
+      feature.gr.s <- feature.gr.s[lengths(feature.gr.s)>0]
+      names(feature.gr.s) <- NULL
+      feature_geometries <- lapply(feature.gr.s, function(this.feature.gr){
+        genePos <- calGenePos(this.feature.gr, obj,
+                              arrowLen, rate = rate, kd = 3)
+        feature_type <- as.character(this.feature.gr$type[1])
+        feature_tag <- ifelse(feature_type=='gene', 'gene_body', feature_type)
+        if (length(genePos) > 0) {
+          gene_body_geometries <- lapply(seq_along(genePos$xs), function(idx) {
             threeJsGeometry(
-              x = genePos$x2[idx],
-              y = genePos$y2[idx],
-              z = (genePos$z2[idx] + genePos$z1[idx]) / 2,
-              type = "label", #' text',
+              x = genePos$xs[[idx]],
+              y = genePos$ys[[idx]],
+              z = genePos$zs[[idx]],
               colors = genePos$fgf$col[idx],
-              tag = "gene_labels",
+              type = "line",
+              tag = feature_tag,
               properties = list(
-                label = unname(genePos$fgf$label[idx]),
-                size = 0.1,
-                depth = 0.02,
-                pos = 4
+                size = lwd.gene,
+                target = unname(genePos$fgf$label[idx])
               )
             )
+          })
+          names(gene_body_geometries) <- 
+            paste0(feature_tag, "_", genePos$fgf$label)
+          this_geometries <- gene_body_geometries
+          
+          if(feature_type=='gene'){
+            ## add a vertical line at the TSS.
+            this_geometries$tss_vl <- threeJsGeometry(
+              x = as.numeric(rbind(genePos$x1, genePos$x2)),
+              y = as.numeric(rbind(genePos$y1, genePos$y2)),
+              z = as.numeric(rbind(genePos$z1, genePos$z2)),
+              colors = genePos$fgf$col,
+              type = "segment",
+              tag = "tss_labels",
+              properties = list(
+                size = lwd.gene / 2
+              )
+            )
+            isGene <- tolower(genePos$fgf$type) %in% "gene" &
+              !genePos$missing_start
+            if (any(isGene)) {
+              ## add arrow
+              tss_arrow <- lapply(which(isGene), function(idx) {
+                threeJsGeometry(
+                  x = c(genePos$x2[idx], tail(genePos$x3[[idx]], n = 1)),
+                  y = c(genePos$y2[idx], tail(genePos$y3[[idx]], n = 1)),
+                  z = c(genePos$z2[idx], tail(genePos$z3[[idx]], n = 1)),
+                  type = "arrow",
+                  colors = genePos$fgf$col[idx],
+                  tag = "tss_labels",
+                  properties = list(
+                    headLength = as.numeric(arrowLen) * .2,
+                    headWidth = as.numeric(arrowLen) * .2,
+                    size = lwd.gene / 2,
+                    target = unname(genePos$fgf$label[idx])
+                  )
+                )
+              })
+              names(tss_arrow) <- paste0("arrow_", genePos$fgf$label[isGene])
+              this_geometries <- c(this_geometries, tss_arrow)
+            }
+          }else{
+            notGene <- (!tolower(genePos$fgf$type) %in% 
+                          c("gene", "compartment", "tad")) &
+              (!genePos$missing_start)
+            if (any(notGene)) {
+              notGeneRadius <- genePos$fgf$pch[notGene]
+              if (length(notGeneRadius) != sum(notGene)) {
+                notGeneRadius <- genePos$fgf$size[notGene]
+                if (length(genePos$fgf$size[notGene]) == sum(notGene)) {
+                  if (!all(vapply(notGeneRadius, is.unit, logical(1L)))) {
+                    stop("The size is not in unit format.")
+                  }
+                  notGeneRadius <- convertUnit(notGeneRadius,
+                                               unitTo = "inch",
+                                               valueOnly = TRUE
+                  ) / 5
+                } else {
+                  notGeneRadius <- 1
+                }
+              }else{
+                notGeneRadius <- notGeneRadius/36
+              }
+              if (length(unique(notGeneRadius)) == 1) {
+                this_geometries$cRE <- threeJsGeometry(
+                  x = genePos$x2[notGene],
+                  y = genePos$y2[notGene],
+                  z = genePos$z2[notGene],
+                  type = "tetrahedron",
+                  colors = genePos$fgf$col[notGene],
+                  tag = feature_tag,
+                  properties = list(
+                    radius = notGeneRadius[1]
+                  )
+                )
+              } else {
+                cis_fgf <- unique(notGeneRadius)
+                geometries_cRE <- lapply(cis_fgf, function(.r) {
+                  idx <- which(notGeneRadius == .r)
+                  threeJsGeometry(
+                    x = genePos$x2[notGene][idx],
+                    y = genePos$y2[notGene][idx],
+                    z = genePos$z2[notGene][idx],
+                    type = "tetrahedron",
+                    colors = genePos$fgf$col[notGene][idx],
+                    tag = feature_tag,
+                    properties = list(
+                      radius = .r
+                    )
+                  )
+                })
+                names(geometries_cRE) <- paste0(feature_tag, "_", cis_fgf)
+                this_geometries <- c(this_geometries, geometries_cRE)
+              }
+            }
           }
-        )
-        names(gene_labels_geometries) <-
-          paste0("gene_label_", genePos$fgf$label[!is.na(genePos$fgf$label)])
-        geometries <- c(geometries, gene_labels_geometries)
-      }
+          
+          if (label_gene && any(!is.na(genePos$fgf$label))) {
+            gene_labels_geometries <- lapply(
+              seq_along(genePos$fgf$label)[!is.na(genePos$fgf$label)],
+              function(idx) {
+                threeJsGeometry(
+                  x = genePos$x2[idx],
+                  y = genePos$y2[idx],
+                  z = (genePos$z2[idx] + genePos$z1[idx]) / 2,
+                  type = "label", #' text',
+                  colors = genePos$fgf$col[idx],
+                  tag = paste0(feature_type, "_labels"),
+                  properties = list(
+                    label = unname(genePos$fgf$label[idx]),
+                    size = 0.1,
+                    depth = 0.02,
+                    pos = 4
+                  )
+                )
+              }
+            )
+            names(gene_labels_geometries) <-
+              paste0(feature_type, "_label_",
+                     genePos$fgf$label[!is.na(genePos$fgf$label)])
+            this_geometries <- c(this_geometries, gene_labels_geometries)
+          }
+          return(this_geometries)
+        }
+        return(NULL)
+      })
+      geometries <- c(
+        geometries,
+        unlist(feature_geometries[
+          lengths(feature_geometries) > 0
+        ])
+      )
     }
+    
+    geometries <- geometries[lengths(geometries) > 0]
     if (renderer == "rgl") {
       return(rglViewer(geometries))
     } else {

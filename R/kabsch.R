@@ -29,6 +29,10 @@ kabsch <- function(query, subject) {
   }
   stopifnot(identical(dim(subject), dim(query)))
   dims <- dim(query)
+  if(nrow(dims)==0){
+    stop('please check the width of the query and subject.',
+         'They must be identical')
+  }
 
   ## center the points
   query <- scale(query, center = TRUE, scale = FALSE)
