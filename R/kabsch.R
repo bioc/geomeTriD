@@ -29,7 +29,7 @@ kabsch <- function(query, subject) {
   }
   stopifnot(identical(dim(subject), dim(query)))
   dims <- dim(query)
-  if(nrow(dims)==0){
+  if(length(dims)==0){
     stop('please check the width of the query and subject.',
          'They must be identical')
   }

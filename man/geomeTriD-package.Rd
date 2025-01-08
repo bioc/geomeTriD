@@ -48,7 +48,7 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Jianhong Ou \email{jianhong.ou@duke.edu} (\href{https://orcid.org/0000-0002-8652-2488}{ORCID})
+\strong{Maintainer}: Jianhong Ou \email{jou@morgridge.org} (\href{https://orcid.org/0000-0002-8652-2488}{ORCID})
 
 }
 \keyword{package}
