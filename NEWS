@@ -1,3 +1,7 @@
+Changes in version 1.1.5
+
+    o Add pdf exporter.
+    
 Changes in version 1.1.4
 
     o Fix the input check issue in kabsch.

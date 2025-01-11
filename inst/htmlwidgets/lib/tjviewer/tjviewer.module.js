@@ -22,6 +22,293 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { PLYExporter } from 'three/addons/exporters/PLYExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { DRACOExporter } from 'three/addons/exporters/DRACOExporter.js';
+// pdf exporters
+import {
+  Projector,
+  RenderableFace,
+	RenderableLine,
+	RenderableSprite } from "three/addons/renderers/Projector.js";
+import { jsPDF } from 'jspdf'; // 2.0.0 version is important! because other version can not load @babel/runtime/helpers/typeof
+//pdfRenderer
+class PDFRenderer{
+  constructor(width, height, backgroundColor){
+    this.ambientLight = new THREE.Color(),
+    this.directionalLights = new THREE.Color(),
+    this.pointLights = new THREE.Color(),
+    this.color = new THREE.Color(),
+    this.vector3 = new THREE.Vector3();
+    this.vec1 = [];
+    this.vec2 = [];
+    this.vec3 = [];
+    this.lights = [];
+    this.widthHalf = width/2;
+    this.heightHalf = height/2;
+    this.pdf = new jsPDF( (width > height ? 'landscape' : 'portrait'), 'pt', [width, height] );
+    this.pdf.setFillColor(backgroundColor.r*255, backgroundColor.g*255, backgroundColor.b*255);
+    this.pdf.rect(0, 0, width, height, "F");
+    this.projector = new Projector();
+    this.sortObjects = true;
+    this.sortElements = true;
+    this.overdraw = 0.5;
+    this.clipRect = new THREE.Box2();
+    this.bboxRect = new THREE.Box2();
+    this.clipRect.min.set(0, 0);
+    this.clipRect.max.set(width, height);
+  }
+
+  calculateLights( lights ) {
+    this.ambientLight.setRGB( 0, 0, 0 );
+    this.directionalLights.setRGB( 0, 0, 0 );
+    this.pointLights.setRGB( 0, 0, 0 );
+
+    for ( let l = 0, ll = lights.length; l < ll; l ++ ) {
+      const light = lights[ l ];
+      const lightColor = light.color;
+      if ( light.isAmbientLight ) {
+        this.ambientLight.r += lightColor.r;
+        this.ambientLight.g += lightColor.g;
+        this.ambientLight.b += lightColor.b;
+      } else if ( light.isDirectionalLight ) {
+        this.directionalLights.r += lightColor.r;
+        this.directionalLights.g += lightColor.g;
+        this.directionalLights.b += lightColor.b;
+      } else if ( light.isPointLight ) {
+        this.pointLights.r += lightColor.r;
+        this.pointLights.g += lightColor.g;
+        this.pointLights.b += lightColor.b;
+      }
+    }
+  }
+
+  calculateLight( lights, position, normal, color ) {
+    for ( let l = 0, ll = lights.length; l < ll; l ++ ) {
+      const light = lights[ l ];
+      const lightColor = light.color;
+      if ( light.isDirectionalLight ) {
+        const lightPosition = this.vector3.setFromMatrixPosition( light.matrixWorld ).normalize();
+        let amount = normal.dot( lightPosition );
+        if ( amount <= 0 ) continue;
+        amount *= light.intensity;
+        color.r += lightColor.r * amount;
+        color.g += lightColor.g * amount;
+        color.b += lightColor.b * amount;
+      } else if ( light.isPointLight ) {
+        const lightPosition = this.vector3.setFromMatrixPosition( light.matrixWorld );
+        let amount = normal.dot( this.vector3.subVectors( lightPosition, position ).normalize() );
+        if ( amount <= 0 ) continue;
+        amount *= light.distance == 0 ? 1 : 1 - Math.min( position.distanceTo( lightPosition ) / light.distance, 1 );
+        if ( amount == 0 ) continue;
+        amount *= light.intensity;
+        color.r += lightColor.r * amount;
+        color.g += lightColor.g * amount;
+        color.b += lightColor.b * amount;
+      }
+    }
+  }
+
+  threeToPdfLineProp ( lineprop ) {
+    return lineprop || 0;
+  }
+
+  setStyleFromMaterial( material ) {
+    this.pdf.setDrawColor( material.color.r*255, material.color.g*255, material.color.b*255 );
+    this.pdf.setFillColor( material.color.r*255, material.color.g*255, material.color.b*255 );
+    // TODO: material.opacity ??
+    if ( material.wireframe ) {
+      this.pdf.setLineWidth( material.wireframeLinewidth && !isNaN(material.wireframeLinewidth) ? material.wireframeLinewidth : 1 );
+      this.pdf.setLineCap( this.threeToPdfLineProp( material.wireframeLinecap ) );
+      this.pdf.setLineJoin( this.threeToPdfLineProp( material.wireframeLinejoin ) );
+    } else {
+      this.pdf.setLineWidth( material.linewidth && !isNaN(material.linewidth) ? material.linewidth : 1 );
+      this.pdf.setLineCap( this.threeToPdfLineProp( material.linecap ) );
+      this.pdf.setLineJoin( this.threeToPdfLineProp( material.linejoin ) );
+    }
+  }
+  normalToComponent( normal ) {
+    var component = ( normal + 1 ) * 0.5;
+    return component < 0 ? 0 : ( component > 1 ? 1 : component );
+  }
+  setColorForElement( element, material ) {
+    if ( material instanceof THREE.MeshBasicMaterial ) {
+      this.color.copy( material.color );
+    } else if ( material instanceof THREE.MeshLambertMaterial ) {
+      var diffuse = material.color;
+      var emissive = material.emissive;
+
+      this.color.r = ambientLight.r;
+      this.color.g = ambientLight.g;
+      this.color.b = ambientLight.b;
+
+      this.calculateLight( lights, element.centroidWorld, element.normalWorld, this.color );
+
+      this.color.r = diffuse.r * this.color.r + emissive.r;
+      this.color.g = diffuse.g * this.color.g + emissive.g;
+      this.color.b = diffuse.b * this.color.b + emissive.b;
+    } else if ( material instanceof THREE.MeshDepthMaterial ) {
+      var w = 1 - ( material.__2near / (material.__farPlusNear - element.z * material.__farMinusNear) );
+      this.color.setRGB( w, w, w );
+    } else if ( material instanceof THREE.MeshNormalMaterial ) {
+      this.color.setRGB( this.normalToComponent( element.normalWorld.x ),
+                     this.normalToComponent( element.normalWorld.y ),
+                     this.normalToComponent( element.normalWorld.z ) );
+
+    }
+
+    this.pdf.setDrawColor( this.color.r*255, this.color.g*255, this.color.b*255 );
+    this.pdf.setFillColor( this.color.r*255, this.color.g*255, this.color.b*255 );
+  }
+  positionScreenToPage( position ) {
+    position.x *= this.widthHalf;
+    position.x += this.widthHalf;
+    position.y *= -this.heightHalf;
+    position.y += this.heightHalf;
+  }
+  renderSprite( v1, element, material ) {
+    if ( material instanceof THREE.LineBasicMaterial ) {
+      this.setStyleFromMaterial( material );
+    }
+    this.pdf.lines( [[1, 1]],
+                    v1.positionScreen.x, v1.positionScreen.y,
+                    [1,1], 'S' );
+  }
+  renderLine ( v1, v2, element, material, scene ) {
+    if ( material instanceof THREE.LineBasicMaterial ) {
+      this.setStyleFromMaterial( material );
+    }
+    this.pdf.lines( [[v2.positionScreen.x-v1.positionScreen.x,
+                      v2.positionScreen.y-v1.positionScreen.y]],
+                    v1.positionScreen.x, v1.positionScreen.y,
+                    [1,1],
+                    'S' );
+  }
+  renderFace3 ( v1, v2, v3, element, material, scene ) {
+    //console.log('renderFace3');
+    this.setStyleFromMaterial( material );
+    this.setColorForElement( element, material );
+    //console.log(material);
+    //console.log(this.pdf.getFillColor());
+    //console.log(this.pdf.getDrawColor());
+    this.pdf.triangle( v1.positionScreen.x, v1.positionScreen.y,
+                       v2.positionScreen.x, v2.positionScreen.y,
+                       v3.positionScreen.x, v3.positionScreen.y,
+                       material.wireframe ? 'S' : 'F' );// Stroke or Fill, FD: fill then stroke
+  }
+  renderLine2(v1, v2, material){
+      this.setStyleFromMaterial( material );
+      this.pdf.setDrawColor( this.color.r*255, this.color.g*255, this.color.b*255 );
+      this.pdf.setFillColor( this.color.r*255, this.color.g*255, this.color.b*255 );
+      //console.log(this.color);
+      this.pdf.lines( [[v2.x-v1.x,
+                        v2.y-v1.y]],
+                      v1.x, v1.y,
+                      [1,1],
+                      'S' );
+  }
+  renderLabel(v3, label, color){
+    this.pdf.setTextColor( color );
+    //console.log(this.pdf.getTextColor());
+    this.pdf.text(label, v3.x, v3.y);
+  }
+
+  render(scene, camera){
+    //console.log(scene);
+    var renderData = this.projector.projectScene(scene, camera, this.sortObjects, this.sortElements );
+    this.lights = renderData.lights;
+    this.calculateLights(this.lights);
+
+    for( let e = 0, el = renderData.elements.length; e<el; e++){
+      const element = renderData.elements[ e ];
+      const material = element.material;
+      //console.log(element);
+      if ( material === undefined || material.opacity === 0 ) continue;
+      if ( element instanceof RenderableSprite ) {
+        this.vec1 = element;
+        this.positionScreenToPage( this.vec1.positionScreen );
+        this.renderSprite( this.vec1, element, material );
+      } else if ( element instanceof RenderableLine ) {
+        this.vec1 = element.v1; this.vec2 = element.v2;
+        this.positionScreenToPage( this.vec1.positionScreen );
+        this.positionScreenToPage( this.vec2.positionScreen );
+        this.bboxRect.setFromPoints( [new THREE.Vector2(this.vec1.positionScreen.x, this.vec1.positionScreen.y),
+                                     new THREE.Vector2(this.vec2.positionScreen.x, this.vec2.positionScreen.y)] );
+        if ( !this.clipRect.intersectsBox( this.bboxRect ) ) {
+          continue;
+        }
+        this.renderLine( this.vec1, this.vec2, element, material, scene );
+      } else if ( element instanceof RenderableFace ) {
+        this.vec1 = element.v1; this.vec2 = element.v2; this.vec3 = element.v3;
+        //console.log(this.vec1.positionScreen);
+        //console.log(this.vec2.positionScreen);
+        //console.log(this.vec3.positionScreen);
+        if ( this.vec1.positionScreen.z < - 1 || this.vec1.positionScreen.z > 1 ) continue;
+        if ( this.vec2.positionScreen.z < - 1 || this.vec2.positionScreen.z > 1 ) continue;
+        if ( this.vec3.positionScreen.z < - 1 || this.vec3.positionScreen.z > 1 ) continue;
+
+        this.positionScreenToPage( this.vec1.positionScreen );
+        this.positionScreenToPage( this.vec2.positionScreen );
+        this.positionScreenToPage( this.vec3.positionScreen );
+
+        this.bboxRect.setFromPoints( [new THREE.Vector2(this.vec1.positionScreen.x, this.vec1.positionScreen.y),
+                                     new THREE.Vector2(this.vec2.positionScreen.x, this.vec2.positionScreen.y),
+                                     new THREE.Vector2(this.vec3.positionScreen.x, this.vec3.positionScreen.y)]);
+        //console.log('RenderableFace');
+        //console.log(this.clipRect);
+        //console.log(this.bboxRect);
+        if ( !this.clipRect.intersectsBox( this.bboxRect ) ) {
+          continue;
+        }
+        this.renderFace3( this.vec1, this.vec2, this.vec3, element, material, scene );
+      }
+    }
+    scene.traverse(obj =>  {
+      //CSS2DObject
+      if(obj.isCSS2DObject === true){
+        if(obj.position != undefined && obj.visible){
+          this.vector3.copy(obj.position);
+          this.vector3.project(camera);
+          //console.log(this.vector3);
+          //console.log(obj.position);
+          this.positionScreenToPage( this.vector3 );
+          this.renderLabel( this.vector3, obj.name, obj.element.style.color );
+        }
+      }
+      //line2 or LineSegments2object
+      if(obj.isLine2 === true || obj.isLineSegments2 === true){
+        //console.log(obj);
+        if(obj.geometry.attributes != undefined && obj.visible){
+          var start=obj.geometry.attributes.instanceStart;
+          var color = obj.geometry.attributes.instanceColorStart.data.array;
+          for(var i=0; i<start.data.count; i++){
+            var k=i*start.data.stride;
+            const vec1 = new THREE.Vector3();
+            const vec2 = new THREE.Vector3();
+            vec1.x=start.data.array[k];
+            vec1.y=start.data.array[k+1];
+            vec1.z=start.data.array[k+2];
+            vec2.x=start.data.array[k+3];
+            vec2.y=start.data.array[k+4];
+            vec2.z=start.data.array[k+5];
+            vec1.project(camera);
+            vec2.project(camera);
+            this.positionScreenToPage( vec1 );
+            this.positionScreenToPage( vec2 );
+
+            this.bboxRect.setFromPoints( [new THREE.Vector2(vec1.x, vec1.y),
+                                         new THREE.Vector2(vec2.x, vec2.y)] );
+            if ( !this.clipRect.intersectsBox( this.bboxRect ) ) {
+              continue;
+            }
+            this.color.setRGB( color[k+0], color[k+1], color[k+2] );
+            this.renderLine2( vec1, vec2, obj.material );
+          }
+        }
+      }
+    });
+    //console.log(this.pdf);
+  }
+};
+
+
 // module Widget
 class tjViewer{
   constructor(el, width, height){
@@ -751,6 +1038,34 @@ class tjViewer{
             });
             this.onWindowResize(oldWidth, oldHeight);
             break;
+          case 'pdf':
+            if(this.sideBySide){
+              var pdfRenderer = new PDFRenderer(this.width/2, this.height, this.background);
+              pdfRenderer.render(this.scene, this.camera);
+              pdfRenderer.pdf.save(expparam.filename+'.left.'+expparam.format);
+              var pdfRenderer2 = new PDFRenderer(this.width/2, this.height, this.background2);
+              pdfRenderer2.render(this.scene2, this.camera2);
+              pdfRenderer2.pdf.save(expparam.filename+'.right.'+expparam.format);
+            }else{
+              var pdfRenderer = new PDFRenderer(this.width, this.height, this.background);
+              pdfRenderer.render(this.scene, this.camera);
+              pdfRenderer.pdf.save(expparam.filename+'.'+expparam.format);
+            }
+            if(this.overlay){
+              if(this.sideBySide){
+                var pdfRenderer = new PDFRenderer(this.width/2, this.height, this.backgroundBottom);
+                pdfRenderer.render(this.sceneBottom, this.camera);
+                pdfRenderer.pdf.save(expparam.filename+'.leftBottom.'+expparam.format);
+                var pdfRenderer2 = new PDFRenderer(this.width/2, this.height, this.backgroundBottom2);
+                pdfRenderer2.render(this.sceneBottom2, this.camera2);
+                pdfRenderer2.pdf.save(expparam.filename+'.rightBottom.'+expparam.format);
+              }else{
+                var pdfRenderer = new PDFRenderer(this.width, this.height, this.backgroundBottom);
+                pdfRenderer.render(this.sceneBottom, this.camera);
+                pdfRenderer.pdf.save(expparam.filename+'.bottom.'+expparam.format);
+              }
+            }
+            break;
           case 'drc':
             exporter = new DRACOExporter();
             const drcData = exporter.parse(this.scene, {exportColor:true});
@@ -855,8 +1170,8 @@ class tjViewer{
     exporterGUI.add(expparam, 'filename').onChange(
       val => expparam.filename = val
     );
-    var availableFormat = ['drc', 'gltf', 'ply', 'png', 'stl', 'svg', 'video'];
-    var supportFormat = ['png', 'video'];
+    var availableFormat = ['drc', 'gltf', 'pdf', 'ply', 'png', 'stl', 'svg', 'video'];
+    var supportFormat = ['png', 'pdf', 'video'];
     var exporterDuration = exporterGUI.add(expparam, 'duration', 0, 120, 1).onChange(
       val => expparam.duration = val
     ).hide();
