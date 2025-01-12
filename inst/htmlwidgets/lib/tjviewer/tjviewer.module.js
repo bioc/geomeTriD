@@ -263,7 +263,7 @@ class PDFRenderer{
     scene.traverse(obj =>  {
       //CSS2DObject
       if(obj.isCSS2DObject === true){
-        if(obj.position != undefined && obj.visible){
+        if(obj.position != undefined && obj.visible && camera.layers.test(obj.layers)){
           this.vector3.copy(obj.position);
           this.vector3.project(camera);
           //console.log(this.vector3);
@@ -273,7 +273,7 @@ class PDFRenderer{
         }
       }
       //line2 or LineSegments2object
-      if(obj.isLine2 === true || obj.isLineSegments2 === true){
+      if(obj.isLine2 === true || obj.isLineSegments2 === true && obj.material.visible && camera.layers.test(obj.layers)){
         //console.log(obj);
         if(obj.geometry.attributes != undefined && obj.visible){
           var start=obj.geometry.attributes.instanceStart;
